@@ -50,14 +50,23 @@ bool showUI = false;
 Model* cityModel = nullptr;
 Model* carModel = nullptr;
 Model* groundModel = nullptr;
+
+// Self-driving Car
 mat4 carModelMatrix(1.0f);
+float angle = 0.1f;
 
 vec3 worldUp = vec3(0.0f, 1.0f, 0.0f);
 
 // Camera parameters
 vec3 cameraPosition(15.0f, 15.0f, 15.0f);
 vec3 cameraDirection(-1.0f, -1.0f, -1.0f);
+vec3 cameraRight = normalize(cross(cameraDirection, worldUp));
+vec3 cameraUp = normalize(cross(cameraRight, cameraDirection));
+
+// Car
 mat4 T(1.0f), R(1.0f);
+bool driveCar = false;
+mat4 carCam = translate(vec3(0.f, -2.f, -4.f));
 
 void loadModels()
 {
@@ -83,7 +92,7 @@ void display()
 	int w, h;
 	SDL_GetWindowSize(g_window, &w, &h);
 
-	if(pp.w != old_w || pp.h != old_h)
+	if (pp.w != old_w || pp.h != old_h)
 	{
 		SDL_SetWindowSize(g_window, pp.w, pp.h);
 		w = pp.w;
@@ -107,14 +116,35 @@ void display()
 	// Set up the view matrix
 	// The view matrix defines where the viewer is looking
 	// Initially fixed, but will be replaced in the tutorial.
-	mat4 constantViewMatrix = mat4(0.707106769f, -0.408248276f, 1.00000000f, 0.000000000f, 0.000000000f,
-	                               0.816496551f, 1.00000000f, 0.000000000f, -0.707106769f, -0.408248276f,
-	                               1.00000000f, 0.000000000f, 0.000000000f, 0.000000000f, -30.0000000f,
-	                               1.00000000f);
-	mat4 viewMatrix = constantViewMatrix;
+	//mat4 constantViewMatrix = mat4(0.707106769f, -0.408248276f, 1.00000000f, 0.000000000f, 0.000000000f,
+	//	0.816496551f, 1.00000000f, 0.000000000f, -0.707106769f, -0.408248276f,
+	//	1.00000000f, 0.000000000f, 0.000000000f, 0.000000000f, -30.0000000f,
+	//	1.00000000f);
+
+	mat4 viewMatrix;
+	R[0] = normalize(R[0]);
+	R[2] = vec4(cross(vec3(R[0]), vec3(R[1])), 0.0f);
+	mat4 RT = R * T; // car's pose
+
+	if (driveCar) {
+		vec3 carDir = normalize(vec3(R[2])); // car faces it's z-axis
+		vec3 carRight = normalize(cross(carDir, worldUp));
+		vec3 carUp = normalize(cross(carRight, carDir));
+		// The vectors above are left-handed; OpenGL needs them to be right-handed
+		// Hence why z is always negated
+		mat3 carBaseVectorsWorldSpace(carRight, carUp, -carDir);
+		viewMatrix = carCam * mat4(transpose(carBaseVectorsWorldSpace)) * translate(-vec3(RT[3]));
+	}
+	else {
+		//cameraRight = normalize(cross(cameraDirection, worldUp));
+		//cameraUp = normalize(cross(cameraRight, cameraDirection));
+		mat3 cameraBaseVectorsWorldSpace(cameraRight, cameraUp, -cameraDirection);
+		viewMatrix = mat4(transpose(cameraBaseVectorsWorldSpace)) * translate(-cameraPosition);
+	}
+
 
 	// Setup the projection matrix
-	if(w != old_w || h != old_h)
+	if (w != old_w || h != old_h)
 	{
 		pp.h = h;
 		pp.w = w;
@@ -133,13 +163,25 @@ void display()
 
 	// Ground
 	// Task 5: Uncomment this
-	//drawGround(modelViewProjectionMatrix);
+	drawGround(modelViewProjectionMatrix);
 
-	// car
-	modelViewProjectionMatrix = projectionMatrix * viewMatrix * carModelMatrix;
+	// Car
+	//T[3] = vec4(0.f, 0.f, 5.f, 1.0f);
+
+	modelViewProjectionMatrix = projectionMatrix * viewMatrix * RT;
 	glUniformMatrix4fv(loc, 1, false, &modelViewProjectionMatrix[0].x);
 	render(carModel);
 
+	// Self-driving car
+	carModelMatrix = rotate(angle, vec3(0.f, 1.f, 0.f)); // self rotation
+	carModelMatrix *= translate(vec3(5.f, 0.f, 0.f)); // radius from world center
+	carModelMatrix *= rotate(angle / 100.f, vec3(0.f, 1.f, 0.f)); // rotation in world
+
+	//carModelMatrix = translate(vec3(0.f, 0.f, 5.f));
+	modelViewProjectionMatrix = projectionMatrix * viewMatrix * carModelMatrix;
+	glUniformMatrix4fv(loc, 1, false, &modelViewProjectionMatrix[0].x);
+	render(carModel);
+	angle -= 0.01f;
 
 	glUseProgram(0);
 }
@@ -156,7 +198,7 @@ void gui()
 	ImGui::Text("Aspect Ratio: %.2f", float(pp.w) / float(pp.h));
 	ImGui::SliderFloat("Near Plane", &pp.near, 0.1f, 300.0f, "%.2f", 2.f);
 	ImGui::SliderFloat("Far Plane", &pp.far, 0.1f, 300.0f, "%.2f", 2.f);
-	if(ImGui::Button("Reset"))
+	if (ImGui::Button("Reset"))
 	{
 		pp.fov = 45.0f;
 		pp.w = 1280;
@@ -165,7 +207,7 @@ void gui()
 		pp.far = 300.0f;
 	}
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
-	            ImGui::GetIO().Framerate);
+		ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
 
 	// Render the GUI.
@@ -186,7 +228,7 @@ int main(int argc, char* argv[])
 	bool stopRendering = false;
 	auto startTime = std::chrono::system_clock::now();
 
-	while(!stopRendering)
+	while (!stopRendering)
 	{
 		// update currentTime
 		std::chrono::duration<float> timeSinceStart = std::chrono::system_clock::now() - startTime;
@@ -197,7 +239,7 @@ int main(int argc, char* argv[])
 		display();
 
 		// Render overlay GUI.
-		if(showUI)
+		if (showUI)
 		{
 			gui();
 		}
@@ -207,22 +249,22 @@ int main(int argc, char* argv[])
 
 		// check new events (keyboard among other)
 		SDL_Event event;
-		while(SDL_PollEvent(&event))
+		while (SDL_PollEvent(&event))
 		{
 			// Allow ImGui to capture events.
 			ImGui_ImplSdlGL3_ProcessEvent(&event);
 
 			// More info at https://wiki.libsdl.org/SDL_Event
-			if(event.type == SDL_QUIT || (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_ESCAPE))
+			if (event.type == SDL_QUIT || (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_ESCAPE))
 			{
 				stopRendering = true;
 			}
-			if(event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_g)
+			if (event.type == SDL_KEYUP && event.key.keysym.sym == SDLK_g)
 			{
 				showUI = !showUI;
 			}
-			else if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
-			        && (!showUI || !ImGui::GetIO().WantCaptureMouse))
+			else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
+				&& (!showUI || !ImGui::GetIO().WantCaptureMouse))
 			{
 				g_isMouseDragging = true;
 				int x;
@@ -231,20 +273,28 @@ int main(int argc, char* argv[])
 				g_prevMouseCoords.x = x;
 				g_prevMouseCoords.y = y;
 			}
+			else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT) {
+				driveCar = !driveCar;
+			}
 
-			if(!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
+			if (!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
 			{
 				g_isMouseDragging = false;
 			}
 
-			if(event.type == SDL_MOUSEMOTION && g_isMouseDragging)
+			if (event.type == SDL_MOUSEMOTION && g_isMouseDragging && !driveCar)
 			{
 				// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
 				int delta_x = event.motion.x - g_prevMouseCoords.x;
 				int delta_y = event.motion.y - g_prevMouseCoords.y;
-				if(event.button.button == SDL_BUTTON_LEFT)
+				if (event.button.button == SDL_BUTTON_LEFT)
 				{
-					printf("Mouse motion while left button down (%i, %i)\n", event.motion.x, event.motion.y);
+					float rotationSpeed = 0.005f;
+					mat4 yaw = rotate(rotationSpeed * -delta_x, worldUp);
+					mat4 pitch = rotate(rotationSpeed * -delta_y, normalize(cross(cameraDirection, worldUp)));
+					cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
+
+					//printf("Mouse motion while left button down (%i, %i)\n", event.motion.x, event.motion.y);
 				}
 				g_prevMouseCoords.x = event.motion.x;
 				g_prevMouseCoords.y = event.motion.y;
@@ -254,22 +304,62 @@ int main(int argc, char* argv[])
 		// check keyboard state (which keys are still pressed)
 		const uint8_t* state = SDL_GetKeyboardState(nullptr);
 
-		// implement camera controls based on key states
-		if(state[SDL_SCANCODE_UP])
+		const float speed = 2.f;
+		const float rotateSpeed = 2.f;
+		// implement car controls based on key states
+		if (state[SDL_SCANCODE_UP])
 		{
-			printf("Key Up is pressed down\n");
+			T[3] += speed * deltaTime * vec4(0.0f, 0.0f, 1.0f, 0.0f);
+			//printf("Key Up is pressed down\n");
 		}
-		if(state[SDL_SCANCODE_DOWN])
+		if (state[SDL_SCANCODE_DOWN])
 		{
-			printf("Key Down is pressed down\n");
+			T[3] -= speed * deltaTime * vec4(0.0f, 0.0f, 1.0f, 0.0f);
+			//printf("Key Down is pressed down\n");
 		}
-		if(state[SDL_SCANCODE_LEFT])
+		if (state[SDL_SCANCODE_LEFT])
 		{
-			printf("Key Left is pressed down\n");
+			R[0] -= rotateSpeed * deltaTime * R[2];
+			//T[3] += speed * deltaTime * vec4(1.0f, 0.0f, 0.0f, 0.0f);
+			//printf("Key Left is pressed down\n");
 		}
-		if(state[SDL_SCANCODE_RIGHT])
+		if (state[SDL_SCANCODE_RIGHT])
 		{
-			printf("Key Right is pressed down\n");
+			R[0] += rotateSpeed * deltaTime * R[2];
+			//T[3] -= speed * deltaTime * vec4(1.0f, 0.0f, 0.0f, 0.0f);
+			//printf("Key Right is pressed down\n");
+		}
+		
+		if (!driveCar) {
+			float zoomSpeed = 0.5f;
+			if (event.type == SDL_MOUSEWHEEL)
+			{ // Very buggy.
+				if (event.wheel.y > 0) // scroll up
+				{
+					cameraPosition += zoomSpeed * cameraDirection;
+				}
+				else if (event.wheel.y < 0) // scroll down
+				{
+					cameraPosition -= zoomSpeed * cameraDirection;
+				}
+			}
+
+			float panSpeed = 0.5f;
+			// use camera direction as -z axis and compute the x (cameraRight) and y (cameraUp) base vectors
+			cameraRight = normalize(cross(cameraDirection, worldUp));
+			cameraUp = normalize(cross(cameraRight, cameraDirection));
+			if (state[SDL_SCANCODE_W]) {
+				cameraPosition += panSpeed * cameraUp;
+			}
+			if (state[SDL_SCANCODE_S]) {
+				cameraPosition -= panSpeed * cameraUp;
+			}
+			if (state[SDL_SCANCODE_A]) {
+				cameraPosition -= panSpeed * cameraRight;
+			}
+			if (state[SDL_SCANCODE_D]) {
+				cameraPosition += panSpeed * cameraRight;
+			}
 		}
 	}
 

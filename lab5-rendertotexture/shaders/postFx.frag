@@ -5,6 +5,7 @@ precision highp float;
 
 layout(binding = 0) uniform sampler2D frameBufferTexture;
 layout(binding = 1) uniform sampler2D blurredFrameBufferTexture;
+layout(binding = 2) uniform sampler2D bloomFrameBufferTexture;
 uniform float time = 0.f;
 uniform int currentEffect = 0;
 uniform int filterSize = 1;
@@ -47,6 +48,10 @@ vec3 grayscale(vec3 rgbSample);
  */
 vec3 toSepiaTone(vec3 rgbSample);
 
+/**
+ * Mosaic. Same color for a block of 16x16 pixels. Follows top-left of block
+ */
+ vec2 mosaic(vec2 rgbSample);
 
 
 void main()
@@ -73,13 +78,14 @@ void main()
 		fragmentColor = vec4(toSepiaTone(blur(mushrooms(gl_FragCoord.xy))), 1.0);
 		break;
 	case 6:
-		fragmentColor = vec4(0.0); // place holder
+		fragmentColor = textureRect(frameBufferTexture, mosaic(gl_FragCoord.xy));
 		break;
 	case 7:
-		fragmentColor = vec4(0.0); // place holder
+		fragmentColor = textureRect(blurredFrameBufferTexture, gl_FragCoord.xy);
 		break;
 	case 8:
-		fragmentColor = vec4(0.0); // place holder
+		fragmentColor = textureRect(frameBufferTexture, gl_FragCoord.xy) + 
+		 textureRect(bloomFrameBufferTexture, gl_FragCoord.xy);
 		break;
 	}
 }
@@ -99,7 +105,7 @@ vec3 toSepiaTone(vec3 rgbSample)
 	vec3 yiqInverseTransform2 = vec3(1, -1.105, 1.702);
 
 	// transform to YIQ color space and set color information to sepia tone
-	vec3 yiq = vec3(dot(yiqTransform0, rgbSample), 0.2, 0.0);
+	vec3 yiq = vec3(dot(yiqTransform0, rgbSample), 0.2, 0.0); // 0.8 for red
 
 	// inverse transform to RGB color space
 	vec3 result = vec3(dot(yiqInverseTransform0, yiq), dot(yiqInverseTransform1, yiq),
@@ -129,4 +135,9 @@ vec3 blur(vec2 coord)
 vec3 grayscale(vec3 rgbSample)
 {
 	return vec3(rgbSample.r * 0.2126 + rgbSample.g * 0.7152 + rgbSample.b * 0.0722);
+}
+
+vec2 mosaic(vec2 inCoord) 
+{
+	return inCoord - mod(inCoord, 16.f);
 }

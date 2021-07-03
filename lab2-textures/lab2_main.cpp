@@ -29,9 +29,9 @@ GLuint shaderProgram;
 
 // The vertexArrayObject here will hold the pointers to
 // the vertex data (in positionBuffer) and color data per vertex (in colorBuffer)
-GLuint positionBuffer, colorBuffer, indexBuffer, vertexArrayObject;
-
-
+GLuint positionBuffer, colorBuffer, uvBuffer, indexBuffer, vertexArrayObject;
+GLuint texture, explosionTexture;
+GLuint positionExplosionBuffer, uvExplosionBuffer, explosionVertexArray;
 
 void initGL()
 {
@@ -69,6 +69,17 @@ void initGL()
 	//				 Set up the attrib pointer.
 	//				 Enable the vertex attrib array.
 	///////////////////////////////////////////////////////////////////////////
+	float texcoords[] = {
+		0.0f, 0.0f,    // (u,v) for v0
+		0.0f, 15.0f,   // (u,v) for v1
+		1.0f, 15.0f,   // (u,v) for v2
+		1.0f, 0.0f     // (u,v) for v3
+	};
+	glGenBuffers(1, &uvBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, uvBuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(texcoords), texcoords, GL_STATIC_DRAW);
+	glVertexAttribPointer(2, 2, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glEnableVertexAttribArray(2);
 
 	///////////////////////////////////////////////////////////////////////////
 	// Create the element array buffer object
@@ -93,6 +104,79 @@ void initGL()
 	//			Load Texture
 	//************************************
 	// >>> @task 2
+	int w, h, comp;
+	unsigned char* image = stbi_load("../scenes/asphalt.jpg", &w, &h, &comp, STBI_rgb_alpha);
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+	free(image);
+
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	// Indicates that the active texture should be repeated,
+	// instead of for instance clamped, for texture coordinates > 1 or <-1.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glGenerateMipmap(GL_TEXTURE_2D); // generate mipmap using bound texture
+
+	//**********************************************
+
+	//************************************
+	//			EXPLOSION!
+	//************************************
+	// New Vertex Array Object
+	glGenVertexArrays(1, &explosionVertexArray);
+	glBindVertexArray(explosionVertexArray);
+
+	// Vertex Position Buffer
+	const float positionsExplosion[] = {
+		// X      Y       Z
+		-5.0f, 0.0f,  -15.0f,  // v0
+		-5.0f, 5.0f, -15.0f, // v1
+		5.f,  5.0f, -15.0f, // v2
+		5.f,  0.0f,  -15.0f   // v3
+	};
+	// Create a handle for the vertex position buffer
+	glGenBuffers(1, &positionExplosionBuffer);
+	// Set the newly created buffer as the current one
+	glBindBuffer(GL_ARRAY_BUFFER, positionExplosionBuffer);
+	// Send the vertex position data to the current buffer
+	glBufferData(GL_ARRAY_BUFFER, sizeof(positionsExplosion), positionsExplosion, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	// Enable the attribute
+	glEnableVertexAttribArray(0);
+
+	// Texture coordinate buffer
+	float explosionTexcoords[] = {
+		0.0f, 0.0f,    // (u,v) for v0
+		0.0f, 1.0f,   // (u,v) for v1
+		1.0f, 1.0f,   // (u,v) for v2
+		1.0f, 0.0f     // (u,v) for v3
+	};
+	glGenBuffers(1, &uvExplosionBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, uvExplosionBuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(explosionTexcoords), explosionTexcoords, GL_STATIC_DRAW);
+	glVertexAttribPointer(2, 2, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glEnableVertexAttribArray(2);
+
+	// Reuse indices buffer
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer);
+
+	// Load Texture
+	image = stbi_load("../scenes/explosion.png", &w, &h, &comp, STBI_rgb_alpha);
+	glGenTextures(1, &explosionTexture);
+	glBindTexture(GL_TEXTURE_2D, explosionTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+	free(image);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
 
 void display(void)
@@ -130,10 +214,44 @@ void display(void)
 	glUniform3f(loc, camera_pan, 0, 0);
 
 	// >>> @task 3.1
+	glActiveTexture(GL_TEXTURE0); // texture unit 0
+	glBindTexture(GL_TEXTURE_2D, texture); // bind texture to the unit 0
+
+	// Sets the type of filtering to be used on magnifying and
+	// minifying the active texture. These are the nicest available options.
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, (mag > 0) ? GL_LINEAR : GL_NEAREST);
+	switch (mini) {
+	case 1:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		break;
+	case 2:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+		break;
+	case 3:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
+		break;
+	case 4:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+		break;
+	case 5:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		break;
+	default:
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		break;
+	}
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY_EXT, anisotropy); // NOT Core OpenGL4
+
 
 	glBindVertexArray(vertexArrayObject);
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
+	glActiveTexture(GL_TEXTURE0); // texture unit 0
+	glBindTexture(GL_TEXTURE_2D, explosionTexture); // bind texture to the unit 0
+	glBindVertexArray(explosionVertexArray);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 	glUseProgram(0); // "unsets" the current shader program. Not really necessary.
 }

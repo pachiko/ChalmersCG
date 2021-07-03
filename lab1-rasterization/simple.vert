@@ -6,8 +6,9 @@ layout(location = 1) in vec3 color;
 // Task 3: Add an output variable for colors for the fragment shader, and set
 //         it to the vertex color
 ///////////////////////////////////////////////////////////////////////////////
-
+out vec3 vertColor;
 void main()
 {
 	gl_Position = vec4(position, 1.0);
+	vertColor = color;
 }

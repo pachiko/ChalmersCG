@@ -39,6 +39,8 @@ bool g_isMouseDragging = false;
 // Shader programs
 ///////////////////////////////////////////////////////////////////////////////
 GLuint backgroundProgram, shaderProgram, postFxShader;
+GLuint horizontalBlurShader, verticalBlurShader;
+GLuint cutoffShader;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -132,8 +134,15 @@ struct FboInfo
 		///////////////////////////////////////////////////////////////////////
 		// Generate and bind framebuffer
 		///////////////////////////////////////////////////////////////////////
-		// >>> @task 1
-		//...
+		glGenFramebuffers(1, &framebufferId);
+		glBindFramebuffer(GL_FRAMEBUFFER, framebufferId);
+
+		// bind the texture as color attachment 0 (to the currently bound framebuffer)
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTextureTarget, 0);
+		glDrawBuffer(GL_COLOR_ATTACHMENT0);
+
+		// bind the texture as depth attachment (to the currently bound framebuffer)
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthBuffer, 0);
 
 		// check if framebuffer is complete
 		isComplete = checkFramebufferComplete();
@@ -203,6 +212,17 @@ void initGL()
 	postFxShader = labhelper::loadShaderProgram("../lab5-rendertotexture/shaders/postFx.vert",
 	                                            "../lab5-rendertotexture/shaders/postFx.frag");
 
+	horizontalBlurShader = labhelper::loadShaderProgram(
+		"../lab5-rendertotexture/shaders/postFx.vert",
+		"../lab5-rendertotexture/shaders/horizontal_blur.frag");
+	verticalBlurShader = labhelper::loadShaderProgram(
+		"../lab5-rendertotexture/shaders/postFx.vert",
+		"../lab5-rendertotexture/shaders/vertical_blur.frag");
+
+	cutoffShader = labhelper::loadShaderProgram(
+		"../lab5-rendertotexture/shaders/postFx.vert",
+		"../lab5-rendertotexture/shaders/cutoff.frag");
+
 	///////////////////////////////////////////////////////////////////////////
 	// Load environment map
 	///////////////////////////////////////////////////////////////////////////
@@ -220,6 +240,10 @@ void initGL()
 	///////////////////////////////////////////////////////////////////////////
 	int w, h;
 	SDL_GetWindowSize(g_window, &w, &h);
+	const int numFbos = 5;
+	for (int i = 0; i < numFbos; i++) {
+		fboList.push_back(FboInfo(w, h));
+	}
 }
 
 void drawScene(const mat4& view, const mat4& projection)
@@ -311,14 +335,22 @@ void display()
 	///////////////////////////////////////////////////////////////////////////
 	// draw scene from security camera
 	///////////////////////////////////////////////////////////////////////////
-	// >>> @task 2
-	// ...
+	FboInfo& securityFB = fboList[0];
+	glBindFramebuffer(GL_FRAMEBUFFER, securityFB.framebufferId);
+	glViewport(0, 0, securityFB.width, securityFB.height);
+	glClearColor(0.2, 0.2, 0.8, 1.0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	drawScene(securityCamViewMatrix, securityCamProjectionMatrix);
+	labhelper::Material &screen = landingpadModel->m_materials[8];
+	screen.m_emission_texture.gl_id = securityFB.colorTextureTarget;
+
 
 	///////////////////////////////////////////////////////////////////////////
 	// draw scene from camera
 	///////////////////////////////////////////////////////////////////////////
-	glBindFramebuffer(GL_FRAMEBUFFER, 0); // to be replaced with another framebuffer when doing post processing
-	glViewport(0, 0, w, h);
+	FboInfo& mainFB = fboList[1]; // draw to a FBO
+	glBindFramebuffer(GL_FRAMEBUFFER, mainFB.framebufferId);
+	glViewport(0, 0, mainFB.width, mainFB.height);
 	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -327,10 +359,85 @@ void display()
 	// camera (obj-model)
 	drawCamera(securityCamViewMatrix, viewMatrix, projectionMatrix);
 
+	// Bloom
+	FboInfo& cutOffFB = fboList[4];
+	glBindFramebuffer(GL_FRAMEBUFFER, cutOffFB.framebufferId);
+	glViewport(0, 0, cutOffFB.width, cutOffFB.height);
+	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// 1) cutoff using main texture. Cutoff shader uses unit 0 as input
+	glUseProgram(cutoffShader);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, mainFB.colorTextureTarget);
+	labhelper::drawFullScreenQuad();
+	// 2) horizontal blur using cutoff texture. Blur shader uses unit 0 as input
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, cutOffFB.colorTextureTarget);
+	// Don't write to the same buffer!
+	FboInfo& horizontalBlurFB = fboList[2];
+	glBindFramebuffer(GL_FRAMEBUFFER, horizontalBlurFB.framebufferId);
+	glViewport(0, 0, horizontalBlurFB.width, horizontalBlurFB.height);
+	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glUseProgram(horizontalBlurShader);
+	labhelper::drawFullScreenQuad();
+	// 3) vertical blur using horizontal blur texture. 	Unit 0 as input again.
+	glUseProgram(verticalBlurShader);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, horizontalBlurFB.colorTextureTarget);
+	// Write back to cutoff buffer
+	glBindFramebuffer(GL_FRAMEBUFFER, cutOffFB.framebufferId);
+	labhelper::drawFullScreenQuad();
+	// Finally save the bloom (cutoff + blur) texture in unit 2.
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D, cutOffFB.colorTextureTarget);
+
+
+	// Just blurring. Uses main texture as input
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, mainFB.colorTextureTarget);
+	// Bind and clear the horizontal buffer.
+	glBindFramebuffer(GL_FRAMEBUFFER, horizontalBlurFB.framebufferId);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glUseProgram(horizontalBlurShader);
+	labhelper::drawFullScreenQuad();
+	// Bind vertical blur FBO
+	FboInfo& verticalBlurFB = fboList[3];
+	glBindFramebuffer(GL_FRAMEBUFFER, verticalBlurFB.framebufferId);
+	glViewport(0, 0, verticalBlurFB.width, verticalBlurFB.height);
+	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// bind the horizontal blur texture as input.
+	glUseProgram(verticalBlurShader);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, horizontalBlurFB.colorTextureTarget);
+	labhelper::drawFullScreenQuad();
+	// Save the blur (horizontal + vertical) in texture unit 1.
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, verticalBlurFB.colorTextureTarget);
+
+
+	// Post-processing
+	glUseProgram(postFxShader);
+	// default texture to apply post-processing
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, mainFB.colorTextureTarget);
+
+	// Pass some uniforms for post-processing shader
+	labhelper::setUniformSlow(postFxShader, "time", currentTime);
+	labhelper::setUniformSlow(postFxShader, "currentEffect", currentEffect);
+	labhelper::setUniformSlow(postFxShader, "filterSize", filterSizes[filterSize - 1]);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0); // finally render to actual frame buffer
+	glViewport(0, 0, w, h);
+	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	labhelper::drawFullScreenQuad(); // a quad for the post-processed texture
+
 	///////////////////////////////////////////////////////////////////////////
 	// Post processing pass(es)
 	///////////////////////////////////////////////////////////////////////////
-
 
 	glUseProgram(0);
 
