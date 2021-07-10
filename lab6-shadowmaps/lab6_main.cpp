@@ -184,6 +184,8 @@ void drawScene(GLuint currentShaderProgram,
 	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightPosition", vec3(viewSpaceLightPosition));
 	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightDir",
 	                          normalize(vec3(viewMatrix * vec4(-lightPosition, 0.0f))));
+	labhelper::setUniformSlow(currentShaderProgram, "useSpotLight", useSpotLight);
+	labhelper::setUniformSlow(currentShaderProgram, "useSoftFalloff", useSoftFalloff);
 	labhelper::setUniformSlow(currentShaderProgram, "spotOuterAngle", std::cos(radians(outerSpotlightAngle)));
 	labhelper::setUniformSlow(currentShaderProgram, "spotInnerAngle", std::cos(radians(innerSpotlightAngle)));
 	mat4 lightMatrix = translate(vec3(0.5f)) * scale(vec3(0.5f)) * 
@@ -281,6 +283,7 @@ void display(void)
 		glEnable(GL_POLYGON_OFFSET_FILL);
 		glPolygonOffset(polygonOffset_factor, polygonOffset_units);
 	}
+
 	drawScene(simpleShaderProgram, lightViewMatrix, lightProjMatrix, lightViewMatrix, lightProjMatrix);
 	// Show light's view on landing pad's screen
 	labhelper::Material& screen = landingpadModel->m_materials[8];
@@ -291,6 +294,7 @@ void display(void)
 	if (usePolygonOffset) {
 		glDisable(GL_POLYGON_OFFSET_FILL);
 	}
+
 
 	///////////////////////////////////////////////////////////////////////////
 	// Draw from camera
