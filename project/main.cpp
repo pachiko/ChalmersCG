@@ -160,7 +160,7 @@ void generateSamples() {
 	// Generate uniform samples for SSAO
 	ssaoSamples.clear();
 	for (int i = 0; i < numSSAO; i++) {
-		ssaoSamples.push_back(labhelper::uniform_randf(0.f, hemiR) * labhelper::cosineSampleHemisphere());
+		ssaoSamples.push_back(labhelper::randf() * labhelper::cosineSampleHemisphere());
 	} // Remember to bind as uniform to the shader!
 }
 
