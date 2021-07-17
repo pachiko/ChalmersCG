@@ -62,7 +62,8 @@ GLuint backgroundProgram;
 // SSAO
 GLuint depthNormalProgram; // Shader used to generate depth and normals
 GLuint ssaoProgram; // Shader to compute SSAO
-GLuint blurProgram;
+GLuint hBlurProgram;
+GLuint vBlurProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -109,8 +110,9 @@ float polygonOffset_units = 1.0f;
 FboInfo depthNormalFB(1);
 // SSAO FrameBuffer
 FboInfo ssaoFB(1);
-// SSAO Blur FrameBuffer
-FboInfo blurFB(2);
+// SSAO Blur FrameBuffers
+FboInfo blurFB(1);
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
@@ -153,6 +155,14 @@ void loadShaders(bool is_reload)
 	shader = labhelper::loadShaderProgram("../project/ssaoOutput.vert", "../project/ssaoOutput.frag");
 	if (shader != 0)
 		ssaoProgram = shader;
+
+	shader = labhelper::loadShaderProgram("../project/ssaoOutput.vert", "../project/horizontal_blur.frag");
+	if (shader != 0)
+		hBlurProgram = shader;
+
+	shader = labhelper::loadShaderProgram("../project/ssaoOutput.vert", "../project/vertical_blur.frag");
+	if (shader != 0)
+		vBlurProgram = shader;
 }
 
 
@@ -360,7 +370,7 @@ void display(void)
 		}
 
 		// Init
-		if (visSSAO) glBindFramebuffer(GL_FRAMEBUFFER, 0); // visualize SSAO
+		if (visSSAO && !blurSSAO) glBindFramebuffer(GL_FRAMEBUFFER, 0); // visualize SSAO
 		else glBindFramebuffer(GL_FRAMEBUFFER, ssaoFB.framebufferId);
 		glViewport(0, 0, windowWidth, windowHeight);
 		glClearColor(0.2, 0.2, 0.8, 1.0);
@@ -384,6 +394,32 @@ void display(void)
 		glBindTexture(GL_TEXTURE_2D, rotationMap);
 
 		labhelper::drawFullScreenQuad(); // Post-process
+
+		if (blurSSAO) {
+			if (blurFB.width != windowWidth || blurFB.height != windowHeight) {
+				blurFB.resize(windowWidth, windowHeight);
+			}
+
+			// horizontal blur using SSAO texture. Blur shader uses unit 11 as input
+			glActiveTexture(GL_TEXTURE11);
+			glBindTexture(GL_TEXTURE_2D, ssaoFB.colorTextureTargets[0]);
+			// Don't write to the same buffer!
+			glBindFramebuffer(GL_FRAMEBUFFER, blurFB.framebufferId);
+			glViewport(0, 0, windowWidth, windowHeight);
+			glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			glUseProgram(hBlurProgram);
+			labhelper::drawFullScreenQuad();
+			// vertical blur using horizontal blur texture. Unit 11 as input again.
+			glUseProgram(vBlurProgram);
+			glActiveTexture(GL_TEXTURE11);
+			glBindTexture(GL_TEXTURE_2D, blurFB.colorTextureTargets[0]);
+			// Write back to cutoff buffer
+			if (visSSAO) glBindFramebuffer(GL_FRAMEBUFFER, 0); // visualize SSAO
+			else glBindFramebuffer(GL_FRAMEBUFFER, ssaoFB.framebufferId);
+			labhelper::drawFullScreenQuad();
+		}
+
 		if (visSSAO) return;
 	}
 
