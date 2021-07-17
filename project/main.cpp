@@ -414,7 +414,7 @@ void display(void)
 			glUseProgram(vBlurProgram);
 			glActiveTexture(GL_TEXTURE11);
 			glBindTexture(GL_TEXTURE_2D, blurFB.colorTextureTargets[0]);
-			// Write back to cutoff buffer
+			// Write back to SSAO buffer
 			if (visSSAO) glBindFramebuffer(GL_FRAMEBUFFER, 0); // visualize SSAO
 			else glBindFramebuffer(GL_FRAMEBUFFER, ssaoFB.framebufferId);
 			labhelper::drawFullScreenQuad();
