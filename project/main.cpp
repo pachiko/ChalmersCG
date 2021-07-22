@@ -21,13 +21,16 @@ using namespace glm;
 #include <Model.h>
 #include "hdr.h"
 #include "fbo.h"
-
+#include "heightfield.h"
 
 #define PI 3.14159265359
 #define MAX_SSAO 300
 
 using std::min;
 using std::max;
+
+static const char* dbg_terrain_str[] = { "None", "Wireframe Mesh", "Normals" };
+std::vector<int> dbg_vec{ 0, 1, 2 };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Various globals
@@ -42,11 +45,19 @@ int windowWidth, windowHeight;
 bool useSSAO = true;
 int numSSAO = 16;
 float hemiR = 1.f;
-std::vector<vec3> ssaoSamples(numSSAO);
+std::vector<vec3> ssaoSamples;
 int rotMapDimension = 64;
 bool visSSAO = false;
 bool blurSSAO = true;
 bool useRot = true;
+
+// HeightField
+HeightField terrain;
+float terrain_reflectivity = 0.1f;
+float terrain_metalness = 0.1f;
+float terrain_fresnel = 0.1f;
+float terrain_shininess = 0.1f;
+int dbgTerrainMode = 0;
 
 // Mouse input
 ivec2 g_prevMouseCoords = { -1, -1 };
@@ -64,6 +75,8 @@ GLuint depthNormalProgram; // Shader used to generate depth and normals
 GLuint ssaoProgram; // Shader to compute SSAO
 GLuint hBlurProgram;
 GLuint vBlurProgram;
+// Heightfield
+GLuint heightfieldProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -117,7 +130,7 @@ FboInfo blurFB(1);
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
 ///////////////////////////////////////////////////////////////////////////////
-vec3 cameraPosition(-70.0f, 50.0f, 70.0f);
+vec3 cameraPosition(-70.0f, 50.0f, 70.0f); // (0.0f, -1.0f, 0.0f);
 vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
 float cameraSpeed = 10.f;
 
@@ -133,6 +146,9 @@ labhelper::Model* sphereModel = nullptr;
 mat4 roomModelMatrix;
 mat4 landingPadModelMatrix;
 mat4 fighterModelMatrix;
+
+// HeightField
+mat4 terrainModelMatrix;
 
 void loadShaders(bool is_reload)
 {
@@ -163,6 +179,10 @@ void loadShaders(bool is_reload)
 	shader = labhelper::loadShaderProgram("../project/ssaoOutput.vert", "../project/vertical_blur.frag");
 	if (shader != 0)
 		vBlurProgram = shader;
+
+	shader = labhelper::loadShaderProgram("../project/heightfield.vert", "../project/heightfield.frag"); // why is shading.frag having black, circular speckle noise? probably material_shininess etc.
+	if (shader != 0)
+		heightfieldProgram = shader;
 }
 
 
@@ -211,6 +231,14 @@ void initGL()
 	roomModelMatrix = mat4(1.0f);
 	fighterModelMatrix = translate(15.0f * worldUp);
 	landingPadModelMatrix = mat4(1.0f);
+
+	///////////////////////////////////////////////////////////////////////
+	// HeightField
+	///////////////////////////////////////////////////////////////////////
+	terrain.generateMesh(1024);
+	terrainModelMatrix = scale(translate(mat4(1), vec3(0.f, -50.f, 0.f)), vec3(1000.f, 100.0f, 1000.f)); // translate * scale
+	terrain.loadHeightField("../scenes/nlsFinland/L3123F.png");
+	terrain.loadDiffuseTexture("../scenes/nlsFinland/L3123F_downscaled.jpg");
 
 	///////////////////////////////////////////////////////////////////////
 	// Load environment map
@@ -274,6 +302,7 @@ void drawScene(GLuint currentShaderProgram,
                const mat4& lightProjectionMatrix)
 {
 	glUseProgram(currentShaderProgram);
+
 	// Light source
 	vec4 viewSpaceLightPosition = viewMatrix * vec4(lightPosition, 1.0f);
 	labhelper::setUniformSlow(currentShaderProgram, "point_light_color", point_light_color);
@@ -348,7 +377,7 @@ void display(void)
 	mat4 lightViewMatrix = lookAt(lightPosition, vec3(0.0f), worldUp);
 	mat4 lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
 
-
+	
 	///////////////////////////////////////////////////////////////////////////
 	// SSAO
 	///////////////////////////////////////////////////////////////////////////
@@ -369,7 +398,7 @@ void display(void)
 			ssaoFB.resize(windowWidth, windowHeight);
 		}
 
-		// Init
+		// Init Frame Buffer
 		if (visSSAO && !blurSSAO) glBindFramebuffer(GL_FRAMEBUFFER, 0); // visualize SSAO
 		else glBindFramebuffer(GL_FRAMEBUFFER, ssaoFB.framebufferId);
 		glViewport(0, 0, windowWidth, windowHeight);
@@ -379,7 +408,7 @@ void display(void)
 		// Shader
 		glUseProgram(ssaoProgram);
 		labhelper::setUniformSlow(ssaoProgram, "numSSAO", numSSAO); // number of SSAO samples
-		labhelper::setUniformSlow(ssaoProgram, "ssaoSamples", numSSAO, &ssaoSamples[0]); // SSAO samples in vec3 array
+		labhelper::setUniformSlow(ssaoProgram, "ssaoSamples", numSSAO, ssaoSamples.data()); // SSAO samples in vec3 array
 		labhelper::setUniformSlow(ssaoProgram, "inverseProjectionMatrix", inverse(projMatrix));
 		labhelper::setUniformSlow(ssaoProgram, "projectionMatrix", projMatrix);
 		labhelper::setUniformSlow(ssaoProgram, "hemiR", hemiR);
@@ -492,6 +521,40 @@ void display(void)
 	drawBackground(viewMatrix, projMatrix);
 	drawScene(shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix);
 	debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
+
+
+	///////////////////////////////////////////////////////////////////////////
+	// HeightField
+	///////////////////////////////////////////////////////////////////////////
+
+	// Init Frame Buffer
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	if (dbgTerrainMode == 1) glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); // debug mesh
+	glUseProgram(heightfieldProgram);
+	glActiveTexture(GL_TEXTURE12);
+	glBindTexture(GL_TEXTURE_2D, terrain.m_texid_diffuse);
+	glActiveTexture(GL_TEXTURE13);
+	glBindTexture(GL_TEXTURE_2D, terrain.m_texid_hf);
+
+	// Uniforms
+	labhelper::setUniformSlow(heightfieldProgram, "dbgTerrainNormal", dbgTerrainMode == 2);
+	labhelper::setUniformSlow(heightfieldProgram, "dbgTerrainMesh", dbgTerrainMode == 1);
+
+	labhelper::setUniformSlow(heightfieldProgram, "uvSpacing", 1.f/terrain.m_meshResolution);
+	labhelper::setUniformSlow(heightfieldProgram, "modelViewProjectionMatrix", projMatrix * viewMatrix * terrainModelMatrix);
+	labhelper::setUniformSlow(heightfieldProgram, "modelViewMatrix", viewMatrix * terrainModelMatrix);
+	labhelper::setUniformSlow(heightfieldProgram, "normalMatrix", inverse(transpose(viewMatrix))); // normals are already in world space
+	labhelper::setUniformSlow(heightfieldProgram, "viewInverse", inverse(viewMatrix));
+	labhelper::setUniformSlow(heightfieldProgram, "environment_multiplier", environment_multiplier);
+
+	labhelper::setUniformSlow(heightfieldProgram, "terrain_reflectivity", terrain_reflectivity);
+	labhelper::setUniformSlow(heightfieldProgram, "terrain_metalness", terrain_metalness);
+	labhelper::setUniformSlow(heightfieldProgram, "terrain_fresnel", terrain_fresnel);
+	labhelper::setUniformSlow(heightfieldProgram, "terrain_shininess", terrain_shininess);
+
+	// Draw!
+	terrain.submitTriangles();
+	if (dbgTerrainMode == 1) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 }
 
 bool handleEvents(void)
@@ -600,6 +663,8 @@ void gui()
 	ImGui::SliderFloat("Inner Deg.", &innerSpotlightAngle, 0.0f, 90.0f);
 	ImGui::SliderFloat("Outer Deg.", &outerSpotlightAngle, 0.0f, 90.0f);
 	ImGui::Checkbox("Manual light only (right-click drag to move)", &lightManualOnly);
+
+	// SSAO
 	ImGui::Checkbox("Use SSAO", &useSSAO);
 	if (useSSAO) {
 		bool changed = ImGui::SliderInt("Number of SSAO Samples", &numSSAO, 10, MAX_SSAO);
@@ -611,6 +676,28 @@ void gui()
 		ImGui::Checkbox("Bilateral-Blur SSAO", &blurSSAO);
 		ImGui::Checkbox("Visualise SSAO", &visSSAO);
 	}
+
+	// HeightField
+	static auto dbg_getter = [](void* vec, int idx, const char** text) {
+		auto& vector = *static_cast<std::vector<int>*>(vec);
+		if (idx < 0 || idx >= static_cast<int>(vector.size()))
+		{
+			return false;
+		}
+		*text = dbg_terrain_str[vector[idx]];
+		return true;
+	};
+	
+	if (ImGui::Combo("Debug Mode", &dbgTerrainMode, dbg_getter, (void*)&dbg_vec, int(dbg_vec.size())))
+	{
+	}
+	if (dbgTerrainMode == 0) {
+		ImGui::SliderFloat("Terrain Shininess", &terrain_shininess, 0.0f, 1.0f);
+		ImGui::SliderFloat("Terrain Fresnel", &terrain_fresnel, 0.0f, 1.0f);
+		ImGui::SliderFloat("Terrain Metalness", &terrain_metalness, 0.0f, 1.0f);
+		ImGui::SliderFloat("Terrain Reflectivity", &terrain_reflectivity, 0.0f, 1.0f);
+	}
+
 	ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate,
 		ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
