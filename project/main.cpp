@@ -32,6 +32,9 @@ using std::max;
 static const char* dbg_terrain_str[] = { "None", "Wireframe Mesh", "Normals" };
 std::vector<int> dbg_vec{ 0, 1, 2 };
 
+static const char* terrain_str[] = { "Mountains", "Water"};
+std::vector<int> terrain_vec{ 0, 1 };
+
 ///////////////////////////////////////////////////////////////////////////////
 // Various globals
 ///////////////////////////////////////////////////////////////////////////////
@@ -58,6 +61,8 @@ float terrain_metalness = 0.1f;
 float terrain_fresnel = 0.1f;
 float terrain_shininess = 0.1f;
 int dbgTerrainMode = 0;
+int terrainType = 0;
+vec3 water_color = vec3(17.0, 110.0, 166.0)/vec3(255.0);
 
 // Mouse input
 ivec2 g_prevMouseCoords = { -1, -1 };
@@ -236,7 +241,7 @@ void initGL()
 	// HeightField
 	///////////////////////////////////////////////////////////////////////
 	terrain.generateMesh(1024);
-	terrainModelMatrix = scale(translate(mat4(1), vec3(0.f, -50.f, 0.f)), vec3(1000.f, 100.0f, 1000.f)); // translate * scale
+	terrainModelMatrix = translate(vec3(0.f, -100.f, 0.f))*scale(vec3(1000.f, 100.0f, 1000.f)); // translate * scale
 	terrain.loadHeightField("../scenes/nlsFinland/L3123F.png");
 	terrain.loadDiffuseTexture("../scenes/nlsFinland/L3123F_downscaled.jpg");
 
@@ -552,6 +557,10 @@ void display(void)
 	labhelper::setUniformSlow(heightfieldProgram, "terrain_fresnel", terrain_fresnel);
 	labhelper::setUniformSlow(heightfieldProgram, "terrain_shininess", terrain_shininess);
 
+	labhelper::setUniformSlow(heightfieldProgram, "currentTime", currentTime);
+	labhelper::setUniformSlow(heightfieldProgram, "water", terrainType == 1);
+	labhelper::setUniformSlow(heightfieldProgram, "water_color", water_color);
+
 	// Draw!
 	terrain.submitTriangles();
 	if (dbgTerrainMode == 1) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -678,6 +687,22 @@ void gui()
 	}
 
 	// HeightField
+	static auto terrain_getter = [](void* vec, int idx, const char** text) {
+		auto& vector = *static_cast<std::vector<int>*>(vec);
+		if (idx < 0 || idx >= static_cast<int>(vector.size()))
+		{
+			return false;
+		}
+		*text = terrain_str[vector[idx]];
+		return true;
+	};
+
+	if (ImGui::Combo("Terrain Type", &terrainType, terrain_getter, (void*)&terrain_vec, int(terrain_vec.size()))) {}
+
+	if (terrainType == 1) {
+		ImGui::ColorEdit3("Water Color", &water_color.x);
+	}
+
 	static auto dbg_getter = [](void* vec, int idx, const char** text) {
 		auto& vector = *static_cast<std::vector<int>*>(vec);
 		if (idx < 0 || idx >= static_cast<int>(vector.size()))
@@ -688,9 +713,8 @@ void gui()
 		return true;
 	};
 	
-	if (ImGui::Combo("Debug Mode", &dbgTerrainMode, dbg_getter, (void*)&dbg_vec, int(dbg_vec.size())))
-	{
-	}
+	if (ImGui::Combo("Debug Mode", &dbgTerrainMode, dbg_getter, (void*)&dbg_vec, int(dbg_vec.size()))) {}
+
 	if (dbgTerrainMode == 0) {
 		ImGui::SliderFloat("Terrain Shininess", &terrain_shininess, 0.0f, 1.0f);
 		ImGui::SliderFloat("Terrain Fresnel", &terrain_fresnel, 0.0f, 1.0f);

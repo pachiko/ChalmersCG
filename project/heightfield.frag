@@ -26,6 +26,8 @@ uniform float terrain_fresnel;
 uniform float terrain_shininess;
 uniform bool dbgTerrainNormal;
 uniform bool dbgTerrainMesh;
+uniform bool water;
+uniform vec3 water_color;
 
 ///////////////////////////////////////////////////////////////////////////////
 // From vertex shader
@@ -52,7 +54,7 @@ vec3 calculateIndirectIllumination(vec3 wo, vec3 n)
 
 	vec2 lookup = vec2(phi / (2.0 * PI), theta / PI);
 	vec3 irradiance  = (environment_multiplier * texture(irradianceMap, lookup)).xyz;
-	vec3 terrain_color = texture(diffuseMap, texCoord).xyz;
+	vec3 terrain_color = water? water_color : texture(diffuseMap, texCoord).xyz;
 	vec3 diffuse_term = (terrain_color / PI * irradiance);
 
 
@@ -88,7 +90,7 @@ void main()
 	} else {
 		vec3 wo = -normalize(viewSpacePosition);
 		vec3 n = normalize(viewSpaceNormal);
-
+		
 		fragmentColor = vec4(calculateIndirectIllumination(wo, n), 1.f);
 	}
 }
