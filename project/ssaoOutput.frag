@@ -99,6 +99,7 @@ void main() {
 		float blocker_depth = texture(depthMap, sample_texCoord).x;
 
 		// Find the view-space coord of the blocker
+		// NB: diff results if reuse vs_sample_position.xy, since diff depth is used to homogenize
 		vec3 vs_blocker_pos = homogenize(inverseProjectionMatrix * 
 			 vec4(sample_coords_ndc.xy, blocker_depth * 2.0 - 1.0, 1.0));	
 
