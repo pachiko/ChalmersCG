@@ -62,7 +62,7 @@ void main() {
 	vec2 texCoord = gl_FragCoord.xy/textureSize(depthMap, 0); // Both depth and normal maps have same dimensions
 	float fragmentDepth = texture(depthMap, texCoord).x; // why x, why r? makes no difference!
 
-	// Normalized Device Coordinates (clip space)
+	// Normalized Device Coordinates (NOT clip space! clips space is [-w, w])
 	vec4 ndc = vec4(texCoord.x * 2.0 - 1.0, texCoord.y * 2.0 - 1.0, 
 					fragmentDepth * 2.0 - 1.0, 1.0);
 
