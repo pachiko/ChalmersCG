@@ -5,7 +5,7 @@ precision highp float;
 
 layout(location = 0) out vec4 fragmentColor;
 layout(binding = 6) uniform sampler2D environmentMap;
-in vec2 texCoord;
+in vec2 texCoord; // We dont really need the texCoord here, more like the vertex position which is on near plane
 uniform mat4 inv_PV;
 uniform vec3 camera_pos;
 uniform float environment_multiplier;
@@ -15,8 +15,8 @@ void main()
 {
 	// Calculate the world-space position of this fragment on the near plane
 	// xy from projected to camera (P-1), then world (V-1)
-	vec4 pixel_world_pos = inv_PV * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0);
-	// De-homogenize, since w = -z in P
+	vec4 pixel_world_pos = inv_PV * vec4(texCoord * 2.0 - 1.0, 1.0, 1.0); // [-1, 1] seems to work/give same result, even 0
+	// Homogenize, always do this when using projection/inverse projection
 	pixel_world_pos = (1.0 / pixel_world_pos.w) * pixel_world_pos;
 
 	// Calculate the world-space direction from the camera to that position
