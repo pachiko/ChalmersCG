@@ -55,7 +55,8 @@ vec4 quarternion(vec3 axis, float angle) {
 
 
 vec3 applyQuarternion(vec4 q, vec3 v) {
-	return v + 2.0*cross(cross(v, q.xyz ) + q.w*v, q.xyz);
+	vec3 t = 2.0*cross(q.xyz, v);
+	return v + cross(q.xyz, t) + q.w*t;
 }
 
 void main() {
