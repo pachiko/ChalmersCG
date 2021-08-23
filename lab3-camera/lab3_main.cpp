@@ -124,7 +124,7 @@ void display()
 	mat4 viewMatrix;
 	R[0] = normalize(R[0]);
 	R[2] = vec4(cross(vec3(R[0]), vec3(R[1])), 0.0f);
-	mat4 RT = R * T; // car's pose
+	mat4 TR = T * R; // car's pose
 
 	if (driveCar) {
 		vec3 carDir = normalize(vec3(R[2])); // car faces it's z-axis
@@ -133,7 +133,7 @@ void display()
 		// The vectors above are left-handed; OpenGL needs them to be right-handed
 		// Hence why z is always negated
 		mat3 carBaseVectorsWorldSpace(carRight, carUp, -carDir);
-		viewMatrix = carCam * mat4(transpose(carBaseVectorsWorldSpace)) * translate(-vec3(RT[3]));
+		viewMatrix = carCam * mat4(transpose(carBaseVectorsWorldSpace)) * translate(-vec3(TR[3]));
 	}
 	else {
 		//cameraRight = normalize(cross(cameraDirection, worldUp));
@@ -168,7 +168,7 @@ void display()
 	// Car
 	//T[3] = vec4(0.f, 0.f, 5.f, 1.0f);
 
-	modelViewProjectionMatrix = projectionMatrix * viewMatrix * RT;
+	modelViewProjectionMatrix = projectionMatrix * viewMatrix * TR;
 	glUniformMatrix4fv(loc, 1, false, &modelViewProjectionMatrix[0].x);
 	render(carModel);
 
@@ -309,25 +309,19 @@ int main(int argc, char* argv[])
 		// implement car controls based on key states
 		if (state[SDL_SCANCODE_UP])
 		{
-			T[3] += speed * deltaTime * vec4(0.0f, 0.0f, 1.0f, 0.0f);
-			//printf("Key Up is pressed down\n");
+			T[3] += R * (speed * deltaTime * vec4(0.0f, 0.0f, 1.0f, 0.0f));
 		}
 		if (state[SDL_SCANCODE_DOWN])
 		{
-			T[3] -= speed * deltaTime * vec4(0.0f, 0.0f, 1.0f, 0.0f);
-			//printf("Key Down is pressed down\n");
+			T[3] -= R * (speed * deltaTime * vec4(0.0f, 0.0f, 1.0f, 0.0f));
 		}
 		if (state[SDL_SCANCODE_LEFT])
 		{
 			R[0] -= rotateSpeed * deltaTime * R[2];
-			//T[3] += speed * deltaTime * vec4(1.0f, 0.0f, 0.0f, 0.0f);
-			//printf("Key Left is pressed down\n");
 		}
 		if (state[SDL_SCANCODE_RIGHT])
 		{
 			R[0] += rotateSpeed * deltaTime * R[2];
-			//T[3] -= speed * deltaTime * vec4(1.0f, 0.0f, 0.0f, 0.0f);
-			//printf("Key Right is pressed down\n");
 		}
 		
 		if (!driveCar) {

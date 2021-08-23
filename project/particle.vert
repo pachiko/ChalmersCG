@@ -1,9 +1,12 @@
 #version 400 compatibility
+
 layout(location = 0) in vec4 particle;
+
 uniform mat4 P;
 uniform float screen_x;
 uniform float screen_y;
 out float life;
+
 void main()
 {
 	life = particle.w;

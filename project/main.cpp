@@ -13,6 +13,7 @@ extern "C" _declspec(dllexport) unsigned int NvOptimusEnablement = 0x00000001;
 #include <labhelper.h>
 #include <imgui.h>
 #include <imgui_impl_sdl_gl3.h>
+#include <stb_image.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
@@ -22,6 +23,7 @@ using namespace glm;
 #include "hdr.h"
 #include "fbo.h"
 #include "heightfield.h"
+#include "ParticleSystem.h"
 
 #define PI 3.14159265359
 #define MAX_SSAO 300
@@ -64,6 +66,10 @@ int dbgTerrainMode = 0;
 int terrainType = 0;
 vec3 water_color = vec3(17.0, 110.0, 166.0)/vec3(255.0);
 
+// Particle System
+GLuint particlesVAO, particlePosLifeBuffer;
+ParticleSystem particleSystem(10000);
+
 // Mouse input
 ivec2 g_prevMouseCoords = { -1, -1 };
 bool g_isMouseDragging = false;
@@ -82,6 +88,8 @@ GLuint hBlurProgram;
 GLuint vBlurProgram;
 // Heightfield
 GLuint heightfieldProgram;
+// Particle system
+GLuint particleProgram;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Environment
@@ -91,6 +99,8 @@ GLuint environmentMap, irradianceMap, reflectionMap;
 const std::string envmap_base_name = "001";
 // SSAO
 GLuint rotationMap;
+// Particles
+GLuint explosionTexture;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Light source
@@ -103,7 +113,6 @@ bool useSpotLight = true;
 float innerSpotlightAngle = 17.5f;
 float outerSpotlightAngle = 22.5f;
 float point_light_intensity_multiplier = 10000.0f;
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // Shadow map
@@ -131,14 +140,12 @@ FboInfo ssaoFB(1);
 // SSAO Blur FrameBuffers
 FboInfo blurFB(1);
 
-
 ///////////////////////////////////////////////////////////////////////////////
 // Camera parameters.
 ///////////////////////////////////////////////////////////////////////////////
 vec3 cameraPosition(-70.0f, 50.0f, 70.0f); // (0.0f, -1.0f, 0.0f);
 vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
 float cameraSpeed = 10.f;
-
 vec3 worldUp(0.0f, 1.0f, 0.0f);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -154,6 +161,9 @@ mat4 fighterModelMatrix;
 
 // HeightField
 mat4 terrainModelMatrix;
+
+// Particles
+mat4 exhaustMatrix, R(1.f), T(1.f);
 
 void loadShaders(bool is_reload)
 {
@@ -185,9 +195,13 @@ void loadShaders(bool is_reload)
 	if (shader != 0)
 		vBlurProgram = shader;
 
-	shader = labhelper::loadShaderProgram("../project/heightfield.vert", "../project/heightfield.frag"); // why is shading.frag having black, circular speckle noise? probably material_shininess etc.
+	shader = labhelper::loadShaderProgram("../project/heightfield.vert", "../project/heightfield.frag");
 	if (shader != 0)
 		heightfieldProgram = shader;
+
+	shader = labhelper::loadShaderProgram("../project/particle.vert", "../project/particle.frag");
+	if (shader != 0)
+		particleProgram = shader;
 }
 
 
@@ -216,6 +230,20 @@ void generateRotMap() {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); // Don't forget these
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	delete[] angles;
+}
+
+
+void setupParticles() {
+	unsigned int max_particles = particleSystem.max_size;
+
+	glGenVertexArrays(1, &particlesVAO);
+	glBindVertexArray(particlesVAO);
+
+	glGenBuffers(1, &particlePosLifeBuffer);
+	glBindBuffer(GL_ARRAY_BUFFER, particlePosLifeBuffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vec4) * max_particles, nullptr, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 4, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glEnableVertexAttribArray(0);
 }
 
 
@@ -264,6 +292,27 @@ void initGL()
 	generateRotMap();
 
 	///////////////////////////////////////////////////////////////////////
+	// Particles
+	///////////////////////////////////////////////////////////////////////
+	setupParticles();
+	exhaustMatrix = translate(vec3(17.f, 3.f, 0.f));
+
+	// Load Explosion Texture
+	int w, h, comp;
+	unsigned char* image = stbi_load("../scenes/explosion.png", &w, &h, &comp, STBI_rgb_alpha);
+	glGenTextures(1, &explosionTexture);
+	glBindTexture(GL_TEXTURE_2D, explosionTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image);
+	free(image);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+
+	///////////////////////////////////////////////////////////////////////
 	// Setup Framebuffer for shadow map rendering
 	///////////////////////////////////////////////////////////////////////
 	glActiveTexture(GL_TEXTURE0);
@@ -277,6 +326,7 @@ void initGL()
 	glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glEnable(GL_CULL_FACE);  // enables backface culling
 }
+
 
 void debugDrawLight(const glm::mat4& viewMatrix,
                     const glm::mat4& projectionMatrix,
@@ -340,11 +390,12 @@ void drawScene(GLuint currentShaderProgram,
 	labhelper::render(landingpadModel);
 
 	// Fighter
+	mat4 TR = T * R;
 	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * fighterModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * fighterModelMatrix);
+	                          projectionMatrix * viewMatrix * fighterModelMatrix * TR);
+	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * fighterModelMatrix * TR);
 	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * fighterModelMatrix)));
+	                          inverse(transpose(viewMatrix * fighterModelMatrix * TR)));
 
 	labhelper::render(fighterModel);
 }
@@ -564,6 +615,57 @@ void display(void)
 	// Draw!
 	terrain.submitTriangles();
 	if (dbgTerrainMode == 1) glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+
+
+	///////////////////////////////////////////////////////////////////////////
+	// Particles
+	///////////////////////////////////////////////////////////////////////////
+	// shader requires particles to be in view space. Just dont move the camera.
+	mat4 mv = viewMatrix * fighterModelMatrix * T * R * exhaustMatrix;
+	vec3 initPos = vec3(mv * vec4(vec3(0.f), 1.f));
+	for (int i = 0; i < 64; i++) { // add 64 particles each frame (within max_size)
+		Particle p;
+		p.lifetime = 0.f;
+		p.life_length = 5.f; // has to be, shader requires it
+		p.pos = initPos;
+		const float theta = labhelper::uniform_randf(0.f, 2.f * M_PI);
+		const float u = labhelper::uniform_randf(0.95f, 1.f);
+		vec3 velocity(u, sqrt(1.f - u * u) * cosf(theta), sqrt(1.f - u * u) * sinf(theta));
+		p.velocity = 20.f*vec3(mv * vec4(velocity, 0.f)); // higher, spread further, but with fringing
+		particleSystem.spawn(p);
+	}
+	// Step too fast and you won't see the particles reaching their end.
+	// Too slow and the particles clump together as more are inserted.
+	// And they go really transparent as they get older, causing invisible particles.
+	// Dont want them to stay old too long.
+	particleSystem.process_particles(0.035f);
+
+	glBindVertexArray(particlesVAO);
+	glBindBuffer(GL_ARRAY_BUFFER, particlePosLifeBuffer);
+	int active_particles = particleSystem.particles.size();
+	std::vector<glm::vec4> reduced_data; // Extraction
+	for (size_t i = 0; i < active_particles; i++) {
+		Particle p = particleSystem.particles[i];
+		reduced_data.push_back(vec4(p.pos, p.lifetime));
+	}
+	std::sort(reduced_data.begin(), std::next(reduced_data.begin(), active_particles),
+		[](const vec4& lhs, const vec4& rhs) { return lhs.z < rhs.z; });
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vec4) * active_particles, reduced_data.data()); // Upload
+	glUseProgram(particleProgram);
+	labhelper::setUniformSlow(particleProgram, "P", projMatrix);
+
+	labhelper::setUniformSlow(particleProgram, "screen_x", float(windowWidth));
+	labhelper::setUniformSlow(particleProgram, "screen_y", float(windowHeight));
+	glActiveTexture(GL_TEXTURE0); // texture unit 0
+	glBindTexture(GL_TEXTURE_2D, explosionTexture); // bind texture to the unit 0
+
+	// Enable shader program point size modulation.
+	glEnable(GL_PROGRAM_POINT_SIZE);
+	// Enable blending.
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glDrawArrays(GL_POINTS, 0, active_particles);
 }
 
 bool handleEvents(void)
@@ -660,6 +762,31 @@ bool handleEvents(void)
 	{
 		cameraPosition += cameraSpeed * deltaTime * worldUp;
 	}
+
+	// Ship speeds
+	const float speed = 50.f;
+	const float rotateSpeed = 5.f;
+
+	// implement ship controls based on key states
+	if (state[SDL_SCANCODE_UP])
+	{
+		T[3] += R*(speed * deltaTime * vec4(-1.0f, 0.0f, 0.0f, 0.0f));
+	}
+	if (state[SDL_SCANCODE_DOWN])
+	{
+		T[3] -= R*(speed * deltaTime * vec4(-1.0f, 0.0f, 0.0f, 0.0f));
+	}
+	if (state[SDL_SCANCODE_LEFT])
+	{
+		mat4 rot = rotate(rotateSpeed * deltaTime, vec3(0, 1, 0));
+		R *= rot;
+	}
+	if (state[SDL_SCANCODE_RIGHT])
+	{
+		mat4 rot = rotate(-rotateSpeed * deltaTime, vec3(0, 1, 0));
+		R *= rot;
+	}
+
 	return quitEvent;
 }
 

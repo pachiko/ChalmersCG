@@ -1,4 +1,5 @@
 #version 420 compatibility
+
 in float life;
 uniform float screen_x;
 uniform float screen_y;
@@ -6,7 +7,8 @@ layout(binding = 0) uniform sampler2D colortexture;
 
 void main()
 {
-	// Basse color.
+	// gl_FragColor = vec4(0.0f, 1.0f, 0.0f, 1.f); // Test with green
+	// Base color.
 	gl_FragColor = texture2D(colortexture, gl_PointCoord);
 	// Make it darker the older it is.
 	gl_FragColor.xyz *= (1.0 - life);
