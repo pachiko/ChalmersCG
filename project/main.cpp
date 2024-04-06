@@ -620,8 +620,8 @@ void display(void)
 	///////////////////////////////////////////////////////////////////////////
 	// Particles
 	///////////////////////////////////////////////////////////////////////////
-	// shader requires particles to be in view space. Just dont move the camera.
-	mat4 mv = viewMatrix * fighterModelMatrix * T * R * exhaustMatrix;
+
+	mat4 mv = fighterModelMatrix * T * R * exhaustMatrix;
 	vec3 initPos = vec3(mv * vec4(vec3(0.f), 1.f));
 	for (int i = 0; i < 64; i++) { // add 64 particles each frame (within max_size)
 		Particle p;
@@ -646,12 +646,27 @@ void display(void)
 	std::vector<glm::vec4> reduced_data; // Extraction
 	for (size_t i = 0; i < active_particles; i++) {
 		Particle p = particleSystem.particles[i];
-		reduced_data.push_back(vec4(p.pos, p.lifetime));
+		reduced_data.push_back(vec4(vec3(viewMatrix * vec4(p.pos, 1.0)), p.lifetime));
 	}
+
+	// Sort accoding to view-space position
 	std::sort(reduced_data.begin(), std::next(reduced_data.begin(), active_particles),
 		[](const vec4& lhs, const vec4& rhs) { return lhs.z < rhs.z; });
+
+	mat4 invView = inverse(viewMatrix);
+	for (auto& rd : reduced_data) {
+		vec4 p(rd.x, rd.y, rd.z, 1.f);
+		p = invView * p;
+		rd.x = p.x;
+		rd.y = p.y;
+		rd.z = p.z;
+	}
+
 	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vec4) * active_particles, reduced_data.data()); // Upload
 	glUseProgram(particleProgram);
+
+	mat4 viewNoRotate =  translate(vec3(viewMatrix[3])) * rotate(static_cast<float>(PI/2), vec3(0.f, 1.f, 0.f));
+	labhelper::setUniformSlow(particleProgram, "V", viewMatrix);
 	labhelper::setUniformSlow(particleProgram, "P", projMatrix);
 
 	labhelper::setUniformSlow(particleProgram, "screen_x", float(windowWidth));
