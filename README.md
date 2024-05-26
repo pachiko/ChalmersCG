@@ -5,3 +5,10 @@ Technology 2019. It contains resources and skeleton code which is to be filled i
 The accompanying web page to this repository is located at http://www.cse.chalmers.se/edu/course/TDA362/tutorials/index.html.
 
 Instructions on how to use this repository specifically can be found at http://www.cse.chalmers.se/edu/course/TDA362/tutorials/start.html.
+
+## Dependencies
+-Embree for high-performance ray-tracing
+-GLEW for loading OpenGL extensions
+-GLM for linear algebra
+-SDL2 for windowing and mouse/keyboard events
+
